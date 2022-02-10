@@ -1,2 +1,3 @@
-serverless-aws-example
+sls-aws-example
 tsconfig.*
+*.tgz
