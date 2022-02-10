@@ -1,6 +1,6 @@
 {
   "name": "@tradle/lambda-plugins",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "System to load additional packages based on configuration in lamdba function",
   "main": "./cjs/index.js",
   "module": "./mjs/index.js",
