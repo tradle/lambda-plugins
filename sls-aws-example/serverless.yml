@@ -1,0 +1,16 @@
+service: plugin-example-main
+
+frameworkVersion: '3'
+
+plugins:
+  - serverless-plugin-typescript
+
+provider:
+  name: aws
+  runtime: nodejs14.x
+
+functions:
+  hello:
+    handler: handler.hello
+    environment:
+      DEBUG: '*'
