@@ -50,4 +50,4 @@ variable you can get insight on what happens.
 
 ## License
 
-[MIT][./LICENSE]
+[MIT](./LICENSE)

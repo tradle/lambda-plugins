@@ -13,7 +13,7 @@ const PLUGINS_FOLDER = 'plugins'
 const PLUGINS_CACHE_FOLDER = 'plugins_cache'
 const PLUGINS_FILE = '.plugins.installed'
 
-function consumeOutput (data: Out[], type: number, binary: boolean) {
+function consumeOutput (data: Out[], type: number, binary: boolean): Buffer | string {
   const bin = Buffer.concat(
     data
       .filter(entry => (entry.type & type) !== 0)
@@ -34,19 +34,19 @@ interface Out {
   data: Buffer
 }
 
-function asyncSpawn <T extends boolean = false>(cmd: string, args: string[], opts: SpawnOpts<T>) {
+function asyncSpawn <T extends boolean = false> (cmd: string, args: string[], opts: SpawnOpts<T>): StrBufPromise<T> {
   return new Promise((resolve, reject) => {
     const { timeout, env, cwd, signal, binary } = opts
     const out: Out[] = []
 
-    const exit = (exitCode: number | null, err?: Error) => {
+    const exit = (exitCode: number | null, err?: Error): void => {
       const stdout = consumeOutput(out, 0b01, binary ?? false)
       if (exitCode === 0) {
         resolve(stdout)
       } else {
         const stderr = consumeOutput(out, 0b10, binary ?? false)
         reject(Object.assign(
-          err ?? new Error(`"${cmd} exited with code [${exitCode}]: ${consumeOutput(out, 0b11, false)}`),
+          err ?? new Error(`"${cmd} exited with code [${exitCode ?? 'null'}]: ${consumeOutput(out, 0b11, false).toString()}`),
           { exitCode, stdout, stderr, cmd, args }
         ))
       }
@@ -55,33 +55,33 @@ function asyncSpawn <T extends boolean = false>(cmd: string, args: string[], opt
     const p = spawn(cmd, args, { env, timeout, cwd, stdio: ['ignore', 'pipe', 'pipe'], signal })
       .on('error', err => exit(null, err))
       .on('close', exit)
-  
+
     p.stdout.on('data', data => out.push({ type: 0b01, data }))
     p.stderr.on('data', data => out.push({ type: 0b10, data }))
   }) as StrBufPromise<T>
 }
 
-const execNpm = <T extends boolean = false> (args: string[], opts: SpawnOpts<T> & { home: string, tmpDir: string }) => {
+function execNpm <T extends boolean = false> (args: string[], opts: SpawnOpts<T> & { home: string, tmpDir: string }): StrBufPromise<T> {
   const { tmpDir, home } = opts
   const cache = path.join(tmpDir, PLUGINS_CACHE_FOLDER)
   return asyncSpawn('npm', [
-    '--global',             // By using global install we make sure that no additional cache is used
-    '--no-fund',            // We don't have output so we don't need fund messages
-    '--no-audit',           // Using audit could reveal plugins to Microsoft
-    '--no-bin-links',       // Installing binaries could be dangerous for the execution
-    `--cache=${cache}`,     // The installation process may need a writable cache
-    `--prefix=${home}`,     // Location where the eventual models are installed.
-    '--prefer-offline',     // if offline version is available, that should be used
-    '--loglevel=error',     // Minimum necessary log level
-    '--no-package-lock',    // We don't have a package-lock, no need to look for it
+    '--global', // By using global install we make sure that no additional cache is used
+    '--no-fund', // We don't have output so we don't need fund messages
+    '--no-audit', // Using audit could reveal plugins to Microsoft
+    '--no-bin-links', // Installing binaries could be dangerous for the execution
+    `--cache=${cache}`, // The installation process may need a writable cache
+    `--prefix=${home}`, // Location where the eventual models are installed.
+    '--prefer-offline', // if offline version is available, that should be used
+    '--loglevel=error', // Minimum necessary log level
+    '--no-package-lock', // We don't have a package-lock, no need to look for it
     '--no-update-notifier', // It doesn't matter if the npm version is old, we will not install a new one.
     ...args
   ], opts)
 }
 
-const isEmptyString = (input: string) => /^\s*$/.test(input)
+const isEmptyString = (input: string): boolean => /^\s*$/.test(input)
 
-async function npmPkgExec (pkgs: Set<string>, op: 'remove' | 'install', tmpDir: string, home: string) {
+async function npmPkgExec (pkgs: Set<string>, op: 'remove' | 'install', tmpDir: string, home: string): Promise<void> {
   try {
     debug('Running %s for %s', op, pkgs)
     const result = await execNpm([op, ...pkgs], { binary: true, tmpDir, home })
@@ -94,19 +94,19 @@ async function npmPkgExec (pkgs: Set<string>, op: 'remove' | 'install', tmpDir: 
 
 type FNOrResult <T> = T | Promise<T> | (() => T) | (() => Promise<T>)
 
-function toPromise <T> (input: FNOrResult<T>): Promise<T> {
+async function toPromise <T> (input: FNOrResult<T>): Promise<T> {
   if (typeof input === 'function') {
     const p = (input as Function)()
-    return Promise.resolve(p)
+    return await Promise.resolve(p)
   }
-  return Promise.resolve(input)
+  return await Promise.resolve(input)
 }
 
-async function assertInstalled (plugins: FNOrResult<string[]>, { tmpDir, maxAge }: { tmpDir: string, maxAge: number }) {
+async function assertInstalled (plugins: FNOrResult<string[]>, { tmpDir, maxAge }: { tmpDir: string, maxAge: number }): Promise<{ home: string }> {
   const home = path.join(tmpDir, PLUGINS_FOLDER)
   const statePath = path.join(tmpDir, PLUGINS_FILE)
-  let toInstall = new Set<string>()
-  let toRemove = new Set<string>()
+  const toInstall = new Set<string>()
+  const toRemove = new Set<string>()
   let pluginList: string[] = []
   let writeState: boolean = false
   try {
@@ -154,7 +154,7 @@ async function assertInstalled (plugins: FNOrResult<string[]>, { tmpDir, maxAge 
 
 async function createPluginProxy ({ tmpDir, home }: { tmpDir: string, home: string }): Promise<{ [key: string]: Promise<any> }> {
   const { dependencies } = JSON.parse(await execNpm(['ls', '--depth=0', '--json'], { tmpDir, home }))
-  
+
   const properties: { [key: string]: { get: () => any, enumerable: true } } = {}
   const inMemCache: { [key: string]: Promise<any> } = {}
 
@@ -183,7 +183,7 @@ async function createPluginProxy ({ tmpDir, home }: { tmpDir: string, home: stri
           }
           inMemCache[name] = loaded
         }
-        return loaded
+        return await loaded
       }
     }
   }
