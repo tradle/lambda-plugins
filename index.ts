@@ -102,99 +102,188 @@ async function toPromise <T> (input: FNOrResult<T>): Promise<T> {
   return await Promise.resolve(input)
 }
 
-async function assertInstalled (plugins: FNOrResult<string[]>, { tmpDir, maxAge }: { tmpDir: string, maxAge: number }): Promise<{ home: string }> {
-  const home = path.join(tmpDir, PLUGINS_FOLDER)
-  const statePath = path.join(tmpDir, PLUGINS_FILE)
-  const toInstall = new Set<string>()
-  const toRemove = new Set<string>()
-  let pluginList: string[] = []
-  let writeState: boolean = false
-  try {
-    const now = Date.now()
-    const stats = await stat(statePath)
-    const max = now - maxAge
-    if (stats.mtimeMs > max) {
-      debug('State is too fresh (%s > %s), skip checking plugins.', stats.mtimeMs, max)
-      return { home }
-    }
-    const [installed, pluginsRaw] = await Promise.all([
-      readFile(statePath, 'utf8'),
-      toPromise(plugins),
-      utimes(statePath, now, now)
-    ])
-    pluginList = pluginsRaw.filter(entry => !isEmptyString(entry)).sort()
-    writeState = true
-    const state = pluginList.join(' ')
-    if (installed === state) {
-      debug('All required plugins installed, nothing to do.')
-      return { home }
-    }
-    for (const installedPlugin of installed.split(' ')) {
-      if (toInstall.has(installedPlugin)) {
-        toInstall.delete(installedPlugin)
-      } else {
-        toRemove.add(installedPlugin)
-      }
-    }
-    writeState = toInstall.size > 0 || toRemove.size > 0
-  } catch (err) {
-    debug('Error while accessing state at %s', statePath)
-  }
-  await mkdir(home, { recursive: true })
-
-  // Remove first to free space as the space is limited.
-  if (toRemove.size > 0) await npmPkgExec(toRemove, 'remove', tmpDir, home)
-  if (toInstall.size > 0) await npmPkgExec(toInstall, 'install', tmpDir, home)
-
-  if (writeState) {
-    await writeFile(statePath, pluginList.join(' '))
-  }
-  return { home }
+interface State {
+  path: string
+  hash: string,
+  timeMs: number | undefined
+  installed: string[]
+  names: string[]
 }
 
-async function createPluginProxy ({ tmpDir, home }: { tmpDir: string, home: string }): Promise<{ [key: string]: Promise<any> }> {
-  const { dependencies } = JSON.parse(await execNpm(['ls', '--depth=0', '--json'], { tmpDir, home }))
+interface StateFs {
+  hash: string
+  installed: string[]
+  names: string[]
+}
 
-  const properties: { [key: string]: { get: () => any, enumerable: true } } = {}
-  const inMemCache: { [key: string]: Promise<any> } = {}
+async function readState ({ tmpDir }: { tmpDir: string }): Promise<State> {
+  const statePath = path.join(tmpDir, PLUGINS_FILE)
+  try {
+    const [stats, stateRaw] = await Promise.all([
+      stat(statePath),
+      readFile(statePath, 'utf-8'),
+    ])
+    try {
+      const plugins = JSON.parse(stateRaw) as StateFs
+      return {
+        ...plugins,
+        path: statePath,
+        timeMs: stats.mtime.getTime()
+      }
+    } catch (err) {
+      debug('Error while parsing json at %s: %s \n(raw: %s)', statePath, err, stateRaw)
+    }
+  } catch (err) {
+    debug('Error while accessing state at %s: %s', statePath, err)
+  }
+  return {
+    path: statePath,
+    hash: '',
+    timeMs: undefined,
+    installed: [],
+    names: []
+  }
+}
 
-  for (const name in dependencies) {
+async function assertInstalled (plugins: FNOrResult<string[]>, { tmpDir, maxAge }: { tmpDir: string, maxAge: number }): Promise<string[]> {
+  const home = path.join(tmpDir, PLUGINS_FOLDER)
+  const state = await readState({ tmpDir })
+  const max = Date.now() - maxAge
+  if (state.timeMs !== undefined && state.timeMs >= max) {
+    debug('State is too fresh (%s > %s), skip checking plugins assuming all installed.', state.timeMs, max)
+    return state.names
+  }
+  const pluginList = (await toPromise(plugins)).filter(entry => !isEmptyString(entry)).sort()
+  const toInstall = new Set<string>(pluginList)
+  const toRemove = new Set<string>()
+  const hash = pluginList.join(' ')
+  if (state.hash === hash) {
+    debug('All required plugins (%s) installed, nothing to do.', plugins)
+    return state.names
+  }
+  for (const installedPlugin of state.installed) {
+    if (toInstall.has(installedPlugin)) {
+      toInstall.delete(installedPlugin)
+    } else {
+      toRemove.add(installedPlugin)
+    }
+  }
+  if (toInstall.size === 0 && toRemove.size === 0) {
+    state.timeMs = Date.now()
+    try {
+      await utimes(state.path, state.timeMs, state.timeMs)
+    } catch (err) {
+      debug('Cant update time of state at %s: %s', state.path, err)
+    }
+    return state.names
+  }
+  try {
+    await mkdir(home, { recursive: true })
+  
+    // Remove first to free space as the space is limited.
+    if (toRemove.size > 0) await npmPkgExec(toRemove, 'remove', tmpDir, home)
+    if (toInstall.size > 0) await npmPkgExec(toInstall, 'install', tmpDir, home)
+  
+    const { dependencies: names } = JSON.parse(await execNpm(['ls', '--depth=0', '--json'], { tmpDir, home }))
+    
+    const stateFs: StateFs = {
+      hash,
+      installed: pluginList,
+      names
+    }
+    await writeFile(state.path, JSON.stringify(stateFs))
+    return names
+  } catch (err) {
+    debug('Error while installing the current plugins: %s, %s', pluginList)
+    return []
+  }
+}
+
+type Cause = {
+  useImport: boolean,
+  cause: string
+}
+
+const CAUSE_FALLBACK: Cause = { cause: 'require', useImport: false }
+const CAUSE_TYPE: Cause = { cause: 'import because of type=module', useImport: true }
+const CAUSE_MODULE: Cause = { cause: 'import because of a defined module', useImport: true }
+const CAUSE_DOT_EXPORT: Cause = { cause: 'import because of exports["."]', useImport: true }
+const CAUSE_DOT_ANY: Cause = { cause: 'import because of exports["./*"]', useImport: true }
+
+function fuzzyChooseImport (pkg: any): Cause {
+  if (pkg.type === 'module') return CAUSE_TYPE
+  if (pkg.module !== undefined) return CAUSE_MODULE
+  if (pkg.exports) {
+    if (pkg.exports['.']?.import !== undefined)
+      return CAUSE_DOT_EXPORT
+    if (pkg.exports['./*']?.import !== undefined)
+      return CAUSE_DOT_ANY
+  }
+  return CAUSE_FALLBACK
+}
+
+async function loadData (name: string, depPath: string, pkg: any): Promise<any> {
+  const { cause, useImport } = fuzzyChooseImport(pkg)
+  debug('Loading package for %s from %s (%s)', name, depPath, cause)
+  return useImport ? await import(depPath) : require(depPath)
+}
+
+async function loadPackage (name: string, depPath: string): Promise<any> {
+  const pkgPath = path.join(depPath, 'package.json')
+  debug('Loading package.json for %s from %s', name, pkgPath)
+  const data = await readFile(pkgPath, 'utf-8')
+  return JSON.parse(data)
+}
+
+export class Plugin {
+  readonly name: string
+  readonly path: string
+
+  #data: Promise<any> | undefined
+  #pkg: Promise<any> | undefined
+
+  constructor (name: string, path: string) {
+    this.name = name
+    this.path = path
+  }
+
+  package ({ force }: { force?: boolean } = {}): Promise<any> {
+    let pkg = this.#pkg
+    if (pkg === undefined || force) {
+      pkg = loadPackage(this.name, this.path)
+      this.#pkg = pkg
+    }
+    return pkg
+  }
+
+  data (opts?: { force?: boolean }): Promise<any> {
+    let data = this.#data
+    if (data === undefined || opts?.force) {
+      data = this.package(opts).then(pkg => loadData(this.name, this.path, pkg))
+      this.#data = data
+    }
+    return data
+  }
+}
+
+async function prepare ({ tmpDir, names }: { tmpDir: string, names: string[] }): Promise<{ [key: string]: Plugin }> {
+  const pluginBase = path.join(tmpDir, PLUGINS_FOLDER, 'lib', 'node_modules')
+  const plugins: { [key: string]: Plugin } = {}
+  for (const name in names) {
     if (typeof name === 'symbol') {
       // This should never occur as JSON.parse only returns key typed properties
       throw new Error(`${String(name)} is a Symbol, symbols are not supported as plugin names.`)
     }
-    properties[name] = {
-      enumerable: true,
-      async get () {
-        // Note: lib/node_modules is used when installing with --global
-        const depPath = path.resolve(...[tmpDir, PLUGINS_FOLDER, 'lib', 'node_modules', ...name.split('/')])
-        if (debug.enabled) debug(`Loading dependency ${name} from ${depPath}`)
-        let loaded = inMemCache[name]
-        if (loaded === undefined) {
-          try {
-            loaded = require(depPath)
-          } catch (err) {
-            try {
-              loaded = await import(depPath)
-            } catch (err2) {
-              debug('After requiring failed, tried to import the module and that didnt work as well with following error', err)
-              throw err
-            }
-          }
-          inMemCache[name] = loaded
-        }
-        return await loaded
-      }
-    }
+    // Note: lib/node_modules is used when installing with --global
+    const depPath = path.resolve(pluginBase, ...name.split('/'))
+    plugins[name] = new Plugin(name, depPath)
   }
-  const result: { [key: string]: Promise<any> } = {}
-  Object.defineProperties(result, properties)
-  return result
+  return plugins
 }
 
-export async function loadPlugins (plugins: FNOrResult<string[]>, { tmpDir, maxAge }: { tmpDir?: string, maxAge?: number } = {}): Promise<{ [key: string]: Promise<any> }> {
+export async function loadPlugins (plugins: FNOrResult<string[]>, { tmpDir, maxAge }: { tmpDir?: string, maxAge?: number } = {}): Promise<{ [key: string]: Plugin }> {
   tmpDir ??= DEFAULT_TMP_DIR
   maxAge ??= DEFAULT_MAX_AGE
-  const { home } = await assertInstalled(plugins, { tmpDir, maxAge })
-  return await createPluginProxy({ tmpDir, home })
+  const names = await assertInstalled(plugins, { tmpDir, maxAge })
+  return await prepare({ tmpDir, names })
 }

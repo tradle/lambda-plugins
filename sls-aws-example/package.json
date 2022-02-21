@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "build": "tsc",
-    "postinstall": "npm i --no-save ../$(cd ..; npm pack --ignore-scripts --loglevel=error)"
+    "postinstall": "npm i --no-save ../$(cd ..; npm run prepare >/dev/null; npm pack --ignore-scripts --loglevel=error)"
   },
   "devDependencies": {
     "@types/debug": "^4.1.7",

@@ -10,7 +10,7 @@ install the packages in the temporary directory and provide an accessor to the p
 ## Usage with serverless
 
 In this example we load the plugins from the envionment variable `PLUGINS` defined
-in the lambda settings. You can also load the definitions from DynamoDB/S3/etc.
+in the lambda settings. In your project you can load definitions from DynamoDB/S3/etc.
 
 ```js
 import { loadPlugins } from '@tradle/lambda-plugins'
@@ -21,7 +21,11 @@ export async function example (event) {
   )
 
   for (const pluginName in plugins) {
-      const plugin = plugins[pluginName] // Note that the plugins are loaded on-demand!
+    const plugin = plugins[pluginName]
+    plugin.name === pluginName
+    plugin.path // File path where the package is loaded from
+    await plugin.package() // Loads the package.json for the package
+    await plugin.data() // Loads the data
   }
 
   // ... the rest of your lambda code.
@@ -52,8 +56,7 @@ await loadPlugins(plugins, { tmpDir: '/other/tmp/dir' })
 The `/tmp` folder persists between requests and every time `loadPlugins` is called,
 it checks the timestamp of the previous run and only checks if new plugins need to
 be installed if the last run was more than 2 minutes ago. You can override this by
-using the `{ maxAge: 1000 }`
-option:
+using the `{ maxAge: 1000 }` option:
 
 ```js
 await loadPlugins(plugins, { maxAge: 1000 })
