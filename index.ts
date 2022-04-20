@@ -104,7 +104,7 @@ async function toPromise <T> (input: FNOrResult<T>): Promise<T> {
 
 interface State {
   path: string
-  hash: string,
+  hash: string
   timeMs: number | undefined
   installed: string[]
   names: string[]
@@ -121,7 +121,7 @@ async function readState ({ tmpDir }: { tmpDir: string }): Promise<State> {
   try {
     const [stats, stateRaw] = await Promise.all([
       stat(statePath),
-      readFile(statePath, 'utf-8'),
+      readFile(statePath, 'utf-8')
     ])
     try {
       const plugins = JSON.parse(stateRaw) as StateFs
@@ -179,13 +179,13 @@ async function assertInstalled (plugins: FNOrResult<string[]>, { tmpDir, maxAge 
   }
   try {
     await mkdir(home, { recursive: true })
-  
+
     // Remove first to free space as the space is limited.
     if (toRemove.size > 0) await npmPkgExec(toRemove, 'remove', tmpDir, home)
     if (toInstall.size > 0) await npmPkgExec(toInstall, 'install', tmpDir, home)
-  
-    const { dependencies: names } = JSON.parse(await execNpm(['ls', '--depth=0', '--json'], { tmpDir, home }))
-    
+
+    const { dependencies } = JSON.parse(await execNpm(['ls', '--depth=0', '--json'], { tmpDir, home }))
+    const names = Object.keys(dependencies)
     const stateFs: StateFs = {
       hash,
       installed: pluginList,
@@ -199,8 +199,8 @@ async function assertInstalled (plugins: FNOrResult<string[]>, { tmpDir, maxAge 
   }
 }
 
-type Cause = {
-  useImport: boolean,
+interface Cause {
+  useImport: boolean
   cause: string
 }
 
@@ -213,11 +213,13 @@ const CAUSE_DOT_ANY: Cause = { cause: 'import because of exports["./*"]', useImp
 function fuzzyChooseImport (pkg: any): Cause {
   if (pkg.type === 'module') return CAUSE_TYPE
   if (pkg.module !== undefined) return CAUSE_MODULE
-  if (pkg.exports) {
-    if (pkg.exports['.']?.import !== undefined)
+  if (typeof pkg.exports === 'object' && pkg.exports !== null) {
+    if (pkg.exports['.']?.import !== undefined) {
       return CAUSE_DOT_EXPORT
-    if (pkg.exports['./*']?.import !== undefined)
+    }
+    if (pkg.exports['./*']?.import !== undefined) {
       return CAUSE_DOT_ANY
+    }
   }
   return CAUSE_FALLBACK
 }
@@ -247,18 +249,21 @@ export class Plugin {
     this.path = path
   }
 
+  /* eslint-disable-next-line @typescript-eslint/promise-function-async */
   package ({ force }: { force?: boolean } = {}): Promise<any> {
     let pkg = this.#pkg
-    if (pkg === undefined || force) {
+    if (pkg === undefined || force !== true) {
       pkg = loadPackage(this.name, this.path)
       this.#pkg = pkg
     }
     return pkg
   }
 
+  /* eslint-disable-next-line @typescript-eslint/promise-function-async */
   data (opts?: { force?: boolean }): Promise<any> {
     let data = this.#data
-    if (data === undefined || opts?.force) {
+    if (data === undefined || opts?.force !== true) {
+      /* eslint-disable-next-line @typescript-eslint/promise-function-async */
       data = this.package(opts).then(pkg => loadData(this.name, this.path, pkg))
       this.#data = data
     }
@@ -269,11 +274,7 @@ export class Plugin {
 async function prepare ({ tmpDir, names }: { tmpDir: string, names: string[] }): Promise<{ [key: string]: Plugin }> {
   const pluginBase = path.join(tmpDir, PLUGINS_FOLDER, 'lib', 'node_modules')
   const plugins: { [key: string]: Plugin } = {}
-  for (const name in names) {
-    if (typeof name === 'symbol') {
-      // This should never occur as JSON.parse only returns key typed properties
-      throw new Error(`${String(name)} is a Symbol, symbols are not supported as plugin names.`)
-    }
+  for (const name of names) {
     // Note: lib/node_modules is used when installing with --global
     const depPath = path.resolve(pluginBase, ...name.split('/'))
     plugins[name] = new Plugin(name, depPath)
