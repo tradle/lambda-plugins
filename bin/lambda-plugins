@@ -1,0 +1,4 @@
+#!/usr/bin/env node
+
+// We use cjs because mjs requires to import the full .mjs path (and breaks)
+require('../cjs/lambda-plugin')

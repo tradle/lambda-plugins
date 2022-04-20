@@ -4,6 +4,7 @@
   "description": "System to load additional packages based on configuration in lamdba function",
   "main": "./cjs/index.js",
   "module": "./mjs/index.js",
+  "bin": "./bin/lambda-plugins",
   "scripts": {
     "prepare": "npm run build",
     "build": "tsc && tsc -p tsconfig.cjs.json",
