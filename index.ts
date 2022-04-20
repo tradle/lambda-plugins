@@ -3,6 +3,7 @@ import { spawn } from 'child_process'
 import { mkdir, readFile, writeFile, stat, utimes } from 'fs/promises'
 import dbg from 'debug'
 import * as path from 'path'
+import { getMatcher, normalize } from './util'
 
 const debug = dbg('@tradle/lambda-plugins')
 
@@ -199,49 +200,24 @@ async function assertInstalled (plugins: FNOrResult<string[]>, { tmpDir, maxAge 
   }
 }
 
-interface Cause {
-  useImport: boolean
-  cause: string
-}
-
-const CAUSE_FALLBACK: Cause = { cause: 'require', useImport: false }
-const CAUSE_TYPE: Cause = { cause: 'import because of type=module', useImport: true }
-const CAUSE_MODULE: Cause = { cause: 'import because of a defined module', useImport: true }
-const CAUSE_DOT_EXPORT: Cause = { cause: 'import because of exports["."]', useImport: true }
-const CAUSE_DOT_ANY: Cause = { cause: 'import because of exports["./*"]', useImport: true }
-
-function fuzzyChooseImport (pkg: any): Cause {
-  if (pkg.type === 'module') return CAUSE_TYPE
-  if (pkg.module !== undefined) return CAUSE_MODULE
-  if (typeof pkg.exports === 'object' && pkg.exports !== null) {
-    if (pkg.exports['.']?.import !== undefined) {
-      return CAUSE_DOT_EXPORT
-    }
-    if (pkg.exports['./*']?.import !== undefined) {
-      return CAUSE_DOT_ANY
-    }
-  }
-  return CAUSE_FALLBACK
-}
-
-async function loadData (name: string, depPath: string, pkg: any): Promise<any> {
-  const { cause, useImport } = fuzzyChooseImport(pkg)
-  debug('Loading package for %s from %s (%s)', name, depPath, cause)
-  return useImport ? await import(depPath) : require(depPath)
-}
-
 async function loadPackage (name: string, depPath: string): Promise<any> {
   const pkgPath = path.join(depPath, 'package.json')
-  debug('Loading package.json for %s from %s', name, pkgPath)
-  const data = await readFile(pkgPath, 'utf-8')
-  return JSON.parse(data)
+  let raw = '{}'
+  try {
+    raw = await readFile(pkgPath, 'utf-8')
+    debug('Using package.json for %s from %s', name, pkgPath)
+  } catch (err) {
+    // Package json is optional
+    debug('No package.json found at %s, using regular lookup', pkgPath)
+  }
+  return JSON.parse(raw)
 }
 
 export class Plugin {
   readonly name: string
   readonly path: string
 
-  #data: Promise<any> | undefined
+  #data: { [child: string]: Promise<any> } | undefined
   #pkg: Promise<any> | undefined
 
   constructor (name: string, path: string) {
@@ -259,15 +235,29 @@ export class Plugin {
     return pkg
   }
 
-  /* eslint-disable-next-line @typescript-eslint/promise-function-async */
-  data (opts?: { force?: boolean }): Promise<any> {
-    let data = this.#data
-    if (data === undefined || opts?.force !== true) {
-      /* eslint-disable-next-line @typescript-eslint/promise-function-async */
-      data = this.package(opts).then(pkg => loadData(this.name, this.path, pkg))
-      this.#data = data
+  async #loadData (child: string, force: boolean): Promise<any> {
+    const pkg = await this.package({ force })
+    const matcher = getMatcher(this.path, pkg)
+    const mjs = matcher(child, 'module')
+    /* eslint-disable-next-line @typescript-eslint/prefer-optional-chain */
+    if (mjs !== undefined && mjs.location !== null) {
+      debug('Importing package for %s from %s (%s)', this.name, mjs.location, mjs.cause)
+      return await import(mjs.location)
     }
-    return data
+    const cjs = matcher(child, 'commonjs')
+    /* eslint-disable-next-line @typescript-eslint/prefer-optional-chain */
+    if (cjs !== undefined && cjs.location !== null) {
+      debug('Requiring package for %s from %s (%s)', this.name, cjs.location, cjs.cause)
+      return require(cjs.location)
+    }
+    throw new Error(`Can not require or import a package for ${this.name} at ${this.path}`)
+  }
+
+  /* eslint-disable-next-line @typescript-eslint/promise-function-async */
+  data (opts?: { force?: boolean, child?: string }): Promise<any> {
+    const all = this.#data ?? (this.#data = {})
+    const child = normalize(opts?.child)
+    return all[child] ?? (all[child] = this.#loadData(child, opts?.force ?? false))
   }
 }
 
