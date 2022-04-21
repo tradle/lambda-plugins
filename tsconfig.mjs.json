@@ -1,6 +1,7 @@
 {
     "extends": "./tsconfig.json",
     "compilerOptions": {
-        "outDir": "cjs"
+        "module": "es2020",
+        "outDir": "mjs"
     }
 }

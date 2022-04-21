@@ -79,9 +79,7 @@ function execNpm <T extends boolean = false> (args: string[], opts: SpawnOpts<T>
   ], opts)
 }
 
-const isEmptyString = (input: string): boolean => /^\s*$/.test(input)
-
-async function npmPkgExec (pkgs: Set<string>, op: 'remove' | 'install', tmpDir: string, home: string): Promise<void> {
+async function npmPkgExec (pkgs: Iterable<string>, op: 'remove' | 'install', tmpDir: string, home: string): Promise<void> {
   try {
     debug('Running %s for %s', op, pkgs)
     const result = await execNpm([op, ...pkgs], { binary: true, tmpDir, home })
@@ -106,14 +104,12 @@ interface State {
   path: string
   hash: string
   timeMs: number | undefined
-  installed: string[]
-  names: string[]
+  pluginsMap: { [key: string]: string }
 }
 
 interface StateFs {
   hash: string
-  installed: string[]
-  names: string[]
+  pluginsMap: { [key: string]: string }
 }
 
 async function readState ({ tmpDir }: { tmpDir: string }): Promise<State> {
@@ -140,32 +136,38 @@ async function readState ({ tmpDir }: { tmpDir: string }): Promise<State> {
     path: statePath,
     hash: '',
     timeMs: undefined,
-    installed: [],
-    names: []
+    pluginsMap: {}
   }
 }
 
-async function assertInstalled (plugins: FNOrResult<string[]>, { tmpDir, maxAge }: { tmpDir: string, maxAge: number }): Promise<string[]> {
+interface ValidatedPluginDefinitions {
+  [name: string]: string
+}
+
+export type PluginDefinitions = ValidatedPluginDefinitions | Map<string, string>
+
+async function assertInstalled (plugins: FNOrResult<PluginDefinitions>, { tmpDir, maxAge }: { tmpDir: string, maxAge: number }): Promise<string[]> {
   const home = path.join(tmpDir, PLUGINS_FOLDER)
   const state = await readState({ tmpDir })
   const max = Date.now() - maxAge
+  const stateNames = Object.keys(state.pluginsMap)
   if (state.timeMs !== undefined && state.timeMs >= max) {
     debug('State is too fresh (%s > %s), skip checking plugins assuming all installed.', state.timeMs, max)
-    return state.names
+    return stateNames
   }
-  const pluginList = (await toPromise(plugins)).filter(entry => !isEmptyString(entry)).sort()
-  const toInstall = new Set<string>(pluginList)
-  const toRemove = new Set<string>()
-  const hash = pluginList.join(' ')
+  const pluginsMap = validatePluginDefinitions(await toPromise(plugins))
+  const hash = JSON.stringify(pluginsMap)
   if (state.hash === hash) {
     debug('All required plugins (%s) installed, nothing to do.', plugins)
-    return state.names
+    return stateNames
   }
-  for (const installedPlugin of state.installed) {
-    if (toInstall.has(installedPlugin)) {
-      toInstall.delete(installedPlugin)
-    } else {
-      toRemove.add(installedPlugin)
+  const installedNames = Object.keys(pluginsMap)
+  const toInstall = new Map(Object.entries(pluginsMap))
+  const toRemove = new Map(Object.entries(state.pluginsMap))
+  for (const [name, version] of toRemove.entries()) {
+    if (toInstall.get(name) === version) {
+      toRemove.delete(name)
+      toInstall.delete(name)
     }
   }
   if (toInstall.size === 0 && toRemove.size === 0) {
@@ -175,26 +177,23 @@ async function assertInstalled (plugins: FNOrResult<string[]>, { tmpDir, maxAge 
     } catch (err) {
       debug('Cant update time of state at %s: %s', state.path, err)
     }
-    return state.names
+    return installedNames
   }
   try {
     await mkdir(home, { recursive: true })
 
     // Remove first to free space as the space is limited.
-    if (toRemove.size > 0) await npmPkgExec(toRemove, 'remove', tmpDir, home)
-    if (toInstall.size > 0) await npmPkgExec(toInstall, 'install', tmpDir, home)
+    if (toRemove.size > 0) await npmPkgExec(toRemove.keys(), 'remove', tmpDir, home)
+    if (toInstall.size > 0) await npmPkgExec(toInstallKeys(toInstall), 'install', tmpDir, home)
 
-    const { dependencies } = JSON.parse(await execNpm(['ls', '--depth=0', '--json'], { tmpDir, home }))
-    const names = Object.keys(dependencies)
     const stateFs: StateFs = {
       hash,
-      installed: pluginList,
-      names
+      pluginsMap
     }
     await writeFile(state.path, JSON.stringify(stateFs))
-    return names
+    return installedNames
   } catch (err) {
-    debug('Error while installing the current plugins: %s, %s', pluginList)
+    debug('Error while installing the current plugins: %s, %s', installedNames, err)
     return []
   }
 }
@@ -282,9 +281,74 @@ async function prepare ({ tmpDir, names }: { tmpDir: string, names: string[] }):
   return plugins
 }
 
-export async function loadPlugins (plugins: FNOrResult<string[]>, { tmpDir, maxAge }: { tmpDir?: string, maxAge?: number } = {}): Promise<{ [key: string]: Plugin }> {
+export async function loadPlugins (plugins: FNOrResult<PluginDefinitions>, { tmpDir, maxAge }: { tmpDir?: string, maxAge?: number } = {}): Promise<{ [key: string]: Plugin }> {
   tmpDir ??= DEFAULT_TMP_DIR
   maxAge ??= DEFAULT_MAX_AGE
   const names = await assertInstalled(plugins, { tmpDir, maxAge })
   return await prepare({ tmpDir, names })
+}
+
+function validatePluginDefinition (key: string, value: string, index: number): string {
+  const e = `Entry #${index}`
+  if (/\s/.test(key)) {
+    throw new Error(`${e} has a name with a space in it, this is not acceptable. Use names without spaces!`)
+  }
+  if (/^\s*$/.test(key)) {
+    throw new Error(`${e} has an empty name, but needs to be defined "${String(key)}"`)
+  }
+  if (value === '*' || value === '') {
+    throw new Error(`${e} "${key}" can not be marked as "${value}" as a vague version is not cachable or secure!`)
+  }
+  const parts = /^(\^|~|>=|<|>|<=|==)?((\d+)(\.\d+)?(\.\d+)?)?$/.exec(value)
+  if (parts !== null) {
+    const [range, version, major, minor, patch] = parts.slice(1)
+    if (range !== undefined || range === '') {
+      throw new Error(`${e} "${key}" can not specify a version range "${range}" and needs to be just the version: ${version ?? '1.2.3'}`)
+    }
+    if (minor === undefined || patch === undefined) {
+      throw new Error(`${e} "${key}" can not specify a vague version range "${major}${minor ?? '.x'}${patch ?? '.x'} (x needs to be defined!)`)
+    }
+    return `${key}@${value}`
+  } else {
+    let url: URL
+    try {
+      url = new URL(value)
+    } catch (err) {
+      throw new Error(`${e} "${key}" needs to be either a (semver-)version like 1.2.3 or a valid URL: ${value}`)
+    }
+    if (url.protocol !== 'https:') {
+      throw new Error(`${e} "${key}" is specified with an unsupported protocol (${url.protocol}), supported protocol: https. Input: ${value}`)
+    }
+    return value
+  }
+}
+
+function sortByFirst ([a]: [string, string], [b]: [string, string]): number {
+  if (a > b) return 1
+  if (a < b) return -1
+  return 0
+}
+
+export function validatePluginDefinitions (input: any): ValidatedPluginDefinitions {
+  const inputType = typeof input
+  if (inputType !== 'object' || input === null) {
+    throw new Error(`input needs to be an key/value object, is (${inputType}) ${String(input)}`)
+  }
+  const entries = Array.from(input instanceof Map ? input.entries() : Object.entries(input)).sort(sortByFirst)
+  let index = 0
+  const result: { [key: string]: string } = {}
+  for (const [key, value] of entries) {
+    validatePluginDefinition(key, value, index)
+    result[key] = value
+    index += 1
+  }
+  return result
+}
+
+function * toInstallKeys (toInstall: Map<string, string>): Iterable<string> {
+  let index = 0
+  for (const [name, version] of toInstall.entries()) {
+    yield validatePluginDefinition(name, version, index)
+    index += 1
+  }
 }

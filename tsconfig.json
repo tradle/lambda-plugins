@@ -5,13 +5,13 @@
     "strictNullChecks": true,
     "sourceMap": true,
     "strict": true,
-    "module": "es2020",
+    "module": "commonjs",
     "strictFunctionTypes": true,
     "forceConsistentCasingInFileNames": true,
     "target": "ES2017",
     "moduleResolution": "node",
     "declaration": true,
     "lib": ["es2018"],
-    "outDir": "./mjs",
+    "outDir": ".work",
   }
 }
