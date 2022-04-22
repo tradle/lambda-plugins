@@ -17,7 +17,7 @@ import { loadPlugins } from '@tradle/lambda-plugins'
 
 export async function example (event) {
   const plugins = await loadPlugins(
-    (process.env.PLUGINS ?? '').split(' ')
+    JSON.parse(process.env.PLUGINS ?? '{}')
   )
 
   for (const pluginName in plugins) {
@@ -34,11 +34,10 @@ export async function example (event) {
 
 In this example the [npm packages][] are separated by a ` `, examples could be:
 
-- `PLUGINS=` ... to load nothing
-- `PLUGINS=moment` ... to load the [`moment`](https://npmjs.com/package/moment)
-- `PLUGINS=moment lodash` ... to load both `moment` and [`lodash`](https://npmjs.com/package/lodash)
-- `PLUGINS=moment@2.29.1` ... to load version 2.29.1 of `moment`
-- `PLUGINS=github:tradle/constants` ... to load the [`tradle/constants`](https://github.com/tradle/constants)
+- `PLUGINS={}` ... to load nothing
+- `PLUGINS={"moment":"2.29.1"}` ... to load the [`moment`](https://npmjs.com/package/moment) package
+- `PLUGINS={"moment":"2.29.1", "lodash":"4.17.17"}` ... to load both the `moment` and the [`lodash`](https://npmjs.com/package/lodash) package
+- `PLUGINS={"moment":"https://github.com/lodash/lodash/archive/refs/tags/4.0.0.tar.gz"}` ... to load the (old) `lodash` package via https
 
 etc.
 
