@@ -1,3 +1,4 @@
 sls-aws-example
 tsconfig.*
 *.tgz
+coverage
