@@ -8,6 +8,21 @@ plugins:
 provider:
   name: aws
   runtime: nodejs14.x
+  iam:
+    role:
+      statements:
+        - Effect: 'Allow'
+          Action:
+            - "s3:GetObject"
+          Resource:
+            'arn:aws:s3:::plugin-example-bucket/*'
+
+resources:
+  Resources:
+    pluginExampleBucket:
+      Type: AWS::S3::Bucket
+      Properties:
+        BucketName: plugin-example-bucket
 
 functions:
   hello:

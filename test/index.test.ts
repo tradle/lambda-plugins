@@ -21,6 +21,11 @@ const valids: Array<{ input: PluginDefinitions, test?: PluginDefinitions }> = [
     }
   },
   {
+    input: {
+      a: 's3:foo'
+    }
+  },
+  {
     input: new Map<string, string>([['a', '1.2.3']]),
     test: { a: '1.2.3' }
   }
@@ -70,7 +75,7 @@ const invalids: Array<{ def: PluginDefinitions, error: string }> = [
     def: {
       a: 'http://some.tgz'
     },
-    error: 'Entry #0 "a" is specified with an unsupported protocol (http:), supported protocol: https. Input: http://some.tgz'
+    error: 'Entry #0 "a" is specified with an unsupported protocol (http:), supported protocols: https, s3. Input: http://some.tgz'
   },
   {
     def: {

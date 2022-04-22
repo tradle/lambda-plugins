@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "build": "tsc",
-    "postinstall": "npm i --no-save ../$(cd ..; npm run prepare >/dev/null; npm pack --ignore-scripts --loglevel=error)"
+    "preinstall": "cd ..; npm run prepare >/dev/null; npm pack --ignore-scripts --loglevel=error"
   },
   "devDependencies": {
     "@types/debug": "^4.1.7",
@@ -13,6 +13,7 @@
     "typescript": "^4.6.3"
   },
   "dependencies": {
+    "@tradle/lambda-plugins": "file:../tradle-lambda-plugins-3.0.1.tgz",
     "debug": "^4.3.4"
   }
 }

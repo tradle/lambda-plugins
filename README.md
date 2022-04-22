@@ -35,13 +35,33 @@ export async function example (event) {
 In this example the [npm packages][] are separated by a ` `, examples could be:
 
 - `PLUGINS={}` ... to load nothing
-- `PLUGINS={"moment":"2.29.1"}` ... to load the [`moment`](https://npmjs.com/package/moment) package
-- `PLUGINS={"moment":"2.29.1", "lodash":"4.17.17"}` ... to load both the `moment` and the [`lodash`](https://npmjs.com/package/lodash) package
-- `PLUGINS={"moment":"https://github.com/lodash/lodash/archive/refs/tags/4.0.0.tar.gz"}` ... to load the (old) `lodash` package via https
+- `PLUGINS={"moment":"2.29.1"}` ... to load the [`moment`][] package.
+- `PLUGINS={"moment":"2.29.1", "lodash":"4.17.17"}` ... to load both the `moment` and
+    the [`lodash`][] package.
+- `PLUGINS={"moment":"https://github.com/lodash/lodash/archive/refs/tags/4.0.0.tar.gz"}`
+    ... to load the _(old)_ `lodash` package via https.
+- `PLUGINS={"moment":"s3://private-bucket/lodash-4.0.0.tar.gz"}` ... to load the `lodash`
+    package from a secret, _ficitional_ s3 bucket.
 
 etc.
 
+[moment]: https://npmjs.com/package/moment
+[lodash]: https://npmjs.com/package/lodash
 [npm packages]: https://docs.npmjs.com/cli/v7/commands/npm-install#description
+
+## S3 Bucket loading
+
+You can publish private packages to s3. These s3 packages get downloaded directly,
+bypassing npm. In order for this to work you need to make sure that the lambda
+has permission to access this bucket:
+
+```yml
+- Effect: 'Allow'
+  Action:
+    - "s3:GetObject"
+  Resource:
+    'arn:aws:s3:::private-bucket/*'
+```
 
 ## Implementation details
 

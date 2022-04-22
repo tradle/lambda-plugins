@@ -3,6 +3,10 @@ import { spawn } from 'child_process'
 import { mkdir, readFile, writeFile, stat, utimes } from 'fs/promises'
 import dbg from 'debug'
 import * as path from 'path'
+import PQueue from 'p-queue'
+import { mkdtempSync } from 'fs'
+import { tmpdir } from 'os'
+import { randomBytes } from 'crypto'
 
 const debug = dbg('@tradle/lambda-plugins')
 
@@ -12,6 +16,8 @@ const DEFAULT_MAX_AGE = 1000 * 60 * 2 // two minutes
 const PLUGINS_FOLDER = 'plugins'
 const PLUGINS_CACHE_FOLDER = 'plugins_cache'
 const PLUGINS_FILE = '.plugins.installed'
+
+const S3_DOWNLOAD_CONCURRENCY = 10
 
 function consumeOutput (data: Out[], type: number, binary: boolean): Buffer | string {
   const bin = Buffer.concat(
@@ -81,8 +87,9 @@ function execNpm <T extends boolean = false> (args: string[], opts: SpawnOpts<T>
 
 async function npmPkgExec (pkgs: Iterable<string>, op: 'remove' | 'install', tmpDir: string, home: string): Promise<void> {
   try {
-    debug('Running %s for %s', op, pkgs)
-    const result = await execNpm([op, ...pkgs], { binary: true, tmpDir, home })
+    const pkgArray = Array.from(pkgs)
+    debug('Running %s for %s', op, pkgArray)
+    const result = await execNpm([op, ...pkgArray], { binary: true, tmpDir, home })
     debug('Npm %s output: %s', op, result)
   } catch (err) {
     debug('Error while %s: %s', op, err)
@@ -184,7 +191,7 @@ async function assertInstalled (plugins: FNOrResult<PluginDefinitions>, { tmpDir
 
     // Remove first to free space as the space is limited.
     if (toRemove.size > 0) await npmPkgExec(toRemove.keys(), 'remove', tmpDir, home)
-    if (toInstall.size > 0) await npmPkgExec(toInstallKeys(toInstall), 'install', tmpDir, home)
+    if (toInstall.size > 0) await npmPkgExec(await toInstallKeys(toInstall), 'install', tmpDir, home)
 
     const stateFs: StateFs = {
       hash,
@@ -316,8 +323,8 @@ function validatePluginDefinition (key: string, value: string, index: number): s
     } catch (err) {
       throw new Error(`${e} "${key}" needs to be either a (semver-)version like 1.2.3 or a valid URL: ${value}`)
     }
-    if (url.protocol !== 'https:') {
-      throw new Error(`${e} "${key}" is specified with an unsupported protocol (${url.protocol}), supported protocol: https. Input: ${value}`)
+    if (!(url.protocol === 'https:' || url.protocol === 's3:')) {
+      throw new Error(`${e} "${key}" is specified with an unsupported protocol (${url.protocol}), supported protocols: https, s3. Input: ${value}`)
     }
     return value
   }
@@ -345,10 +352,40 @@ export function validatePluginDefinitions (input: any): ValidatedPluginDefinitio
   return result
 }
 
-function * toInstallKeys (toInstall: Map<string, string>): Iterable<string> {
+function isS3URL (input: string): boolean {
+  return /^s3:/.test(input)
+}
+
+async function toInstallKeys (toInstall: Map<string, string>): Promise<string[]> {
   let index = 0
+  const installKeys: string[] = []
+  const queue = new PQueue({
+    concurrency: S3_DOWNLOAD_CONCURRENCY
+  })
   for (const [name, version] of toInstall.entries()) {
-    yield validatePluginDefinition(name, version, index)
+    const key = validatePluginDefinition(name, version, index)
+    if (isS3URL(key)) {
+      await queue.add(async (): Promise<void> => {
+        installKeys.push(await resolveS3Target(key))
+      })
+    } else {
+      installKeys.push(key)
+    }
     index += 1
   }
+  await queue.onEmpty()
+  return installKeys
+}
+
+let tmpStorage: string | null = null
+
+async function resolveS3Target (s3Path: string): Promise<string> {
+  if (tmpStorage === null) {
+    tmpStorage = mkdtempSync(path.join(tmpdir(), 'lambda-s3-download-'))
+  }
+  const localPath = path.join(tmpStorage, `${randomBytes(16).toString('hex')}.tgz`)
+  debug('Downloading "%s" from s3 to "%s"', s3Path, localPath)
+  const download = await import('./s3-download')
+  await download.default(s3Path, localPath)
+  return localPath
 }
