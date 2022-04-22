@@ -40,6 +40,8 @@ In this example the [npm packages][] are separated by a ` `, examples could be:
     the [`lodash`][] package.
 - `PLUGINS={"moment":"https://github.com/lodash/lodash/archive/refs/tags/4.0.0.tar.gz"}`
     ... to load the _(old)_ `lodash` package via https.
+- `PLUGINS={"quick-lru":"github:sindresorhus/quick-lru#771392878fc0e2325b1172d04260e87afe94c8f7"}`
+    ... to load the `quick-lru` package directly from github.
 - `PLUGINS={"moment":"s3://private-bucket/lodash-4.0.0.tar.gz"}` ... to load the `lodash`
     package from a secret, _ficitional_ s3 bucket.
 
@@ -47,6 +49,7 @@ etc.
 
 [moment]: https://npmjs.com/package/moment
 [lodash]: https://npmjs.com/package/lodash
+[quick-lru]: https://github.com/sindresorhus/quick-lru
 [npm packages]: https://docs.npmjs.com/cli/v7/commands/npm-install#description
 
 ## S3 Bucket loading

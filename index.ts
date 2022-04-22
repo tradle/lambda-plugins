@@ -323,8 +323,16 @@ function validatePluginDefinition (key: string, value: string, index: number): s
     } catch (err) {
       throw new Error(`${e} "${key}" needs to be either a (semver-)version like 1.2.3 or a valid URL: ${value}`)
     }
+    if (url.protocol === 'github:') {
+      if (!/^#[a-f0-9]{40}$/i.test(url.hash)) {
+        const prevHash = url.hash
+        url.hash = 'abcdef0123456789abcdef0123456789abcdef01'
+        throw new Error(`${e} "${key}" is pointing to a github repository but it needs to specify a version hash like "${url.toString()}" instead of "${prevHash}"`)
+      }
+      return value
+    }
     if (!(url.protocol === 'https:' || url.protocol === 's3:')) {
-      throw new Error(`${e} "${key}" is specified with an unsupported protocol (${url.protocol}), supported protocols: https, s3. Input: ${value}`)
+      throw new Error(`${e} "${key}" is specified with an unsupported protocol (${url.protocol}), supported protocols: https, s3, github. Input: ${value}`)
     }
     return value
   }

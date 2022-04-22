@@ -26,6 +26,11 @@ const valids: Array<{ input: PluginDefinitions, test?: PluginDefinitions }> = [
     }
   },
   {
+    input: {
+      a: 'github:foo/bar#abcdef0123456789abcdef0123456789abcdef01'
+    }
+  },
+  {
     input: new Map<string, string>([['a', '1.2.3']]),
     test: { a: '1.2.3' }
   }
@@ -75,7 +80,19 @@ const invalids: Array<{ def: PluginDefinitions, error: string }> = [
     def: {
       a: 'http://some.tgz'
     },
-    error: 'Entry #0 "a" is specified with an unsupported protocol (http:), supported protocols: https, s3. Input: http://some.tgz'
+    error: 'Entry #0 "a" is specified with an unsupported protocol (http:), supported protocols: https, s3, github. Input: http://some.tgz'
+  },
+  {
+    def: {
+      a: 'github:foo/bar'
+    },
+    error: 'Entry #0 "a" is pointing to a github repository but it needs to specify a version hash like "github:foo/bar#abcdef0123456789abcdef0123456789abcdef01" instead of ""'
+  },
+  {
+    def: {
+      a: 'github:foo/bar#some-branch'
+    },
+    error: 'Entry #0 "a" is pointing to a github repository but it needs to specify a version hash like "github:foo/bar#abcdef0123456789abcdef0123456789abcdef01" instead of "#some-branch"'
   },
   {
     def: {
