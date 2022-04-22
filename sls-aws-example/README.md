@@ -62,6 +62,9 @@ This folder contains a simple [serverless][] setup that can be deployed to your 
     ```
 
     Indicating that the new Plugins are available.
+6. Optional: To try out private dependencies in s3 buckets, you can also upload a dependency to s3 using: `curl https://registry.npmjs.org/@tradle/errors/-/errors-2.0.1.tgz | aws s3 cp - s3://plugin-example-bucket/errors-2.0.1.tgz`
+7. (continue) Then you can change the environment variable to: `{"@tradle/constants": "2.5.1", "@tradle/errors": "s3://plugin-example-bucket/errors-2.0.1.tgz"}`
+8. (continue) Invoking `npx sls invoke --function=hello` will now download the dependency from s3!
 
 ---
 
