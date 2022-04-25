@@ -27,13 +27,13 @@
     "ts-node": "^10.5.0",
     "ts-standard": "^11.0.0",
     "typescript": "^4.4.4",
-    "aws-sdk": "^2.1001.0",
+    "aws-sdk": "^2.1001.0"
+  },
+  "dependencies": {
     "debug": "^4.3.3",
     "p-queue": "^6.6.2"
   },
   "peerDependencies": {
-    "aws-sdk": "^2.1001.0",
-    "debug": "^4.3.3",
-    "p-queue": "^6.6.2"
+    "aws-sdk": "^2.1001.0"
   }
 }

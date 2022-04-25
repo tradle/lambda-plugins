@@ -15,7 +15,6 @@
   "dependencies": {
     "@tradle/lambda-plugins": "file:../tradle-lambda-plugins-3.1.0.tgz",
     "aws-sdk": "^2.1001.0",
-    "debug": "^4.3.4",
-    "p-queue": "^6.6.2"
+    "debug": "^4.3.4"
   }
 }
