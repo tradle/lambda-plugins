@@ -1,5 +1,4 @@
-import type { SpawnOptions } from 'child_process'
-import { spawn } from 'child_process'
+import { spawn, SpawnOptions } from 'child_process'
 import { mkdir, readFile, writeFile, stat, utimes } from 'fs/promises'
 import dbg from 'debug'
 import * as path from 'path'
@@ -247,8 +246,8 @@ export class Plugin {
   readonly name: string
   readonly path: string
 
-  #data: Promise<any> | undefined
-  #pkg: Promise<any> | undefined
+  _data: Promise<any> | undefined
+  _pkg: Promise<any> | undefined
 
   constructor (name: string, path: string) {
     this.name = name
@@ -257,21 +256,21 @@ export class Plugin {
 
   /* eslint-disable-next-line @typescript-eslint/promise-function-async */
   package ({ force }: { force?: boolean } = {}): Promise<any> {
-    let pkg = this.#pkg
+    let pkg = this._pkg
     if (pkg === undefined || force !== true) {
       pkg = loadPackage(this.name, this.path)
-      this.#pkg = pkg
+      this._pkg = pkg
     }
     return pkg
   }
 
   /* eslint-disable-next-line @typescript-eslint/promise-function-async */
   data (opts?: { force?: boolean }): Promise<any> {
-    let data = this.#data
+    let data = this._data
     if (data === undefined || opts?.force !== true) {
       /* eslint-disable-next-line @typescript-eslint/promise-function-async */
       data = this.package(opts).then(pkg => loadData(this.name, this.path, pkg))
-      this.#data = data
+      this._data = data
     }
     return data
   }
@@ -289,8 +288,8 @@ async function prepare ({ tmpDir, names }: { tmpDir: string, names: string[] }):
 }
 
 export async function loadPlugins (plugins: FNOrResult<PluginDefinitions>, { tmpDir, maxAge }: { tmpDir?: string, maxAge?: number } = {}): Promise<{ [key: string]: Plugin }> {
-  tmpDir ??= DEFAULT_TMP_DIR
-  maxAge ??= DEFAULT_MAX_AGE
+  tmpDir = tmpDir ?? DEFAULT_TMP_DIR
+  maxAge = maxAge ?? DEFAULT_MAX_AGE
   const names = await assertInstalled(plugins, { tmpDir, maxAge })
   return await prepare({ tmpDir, names })
 }
