@@ -27,9 +27,9 @@ function consumeOutput (data: Out[], type: number, binary: boolean): Buffer | st
   return binary ? bin : bin.toString()
 }
 
-interface SpawnOpts<T extends boolean> extends Pick<SpawnOptions, 'timeout' | 'env' | 'cwd'> {
+interface SpawnOpts extends Pick<SpawnOptions, 'timeout' | 'env' | 'cwd'> {
   signal?: AbortSignal
-  binary?: T
+  binary?: boolean
 }
 
 type StrBufPromise <T extends boolean> = T extends true ? Promise<Buffer> : Promise<string>
@@ -39,7 +39,7 @@ interface Out {
   data: Buffer
 }
 
-function asyncSpawn <T extends boolean = false> (cmd: string, args: string[], opts: SpawnOpts<T>): StrBufPromise<T> {
+function asyncSpawn <T extends boolean = false> (cmd: string, args: string[], opts: SpawnOpts): StrBufPromise<T> {
   return new Promise((resolve, reject) => {
     const { timeout, env, cwd, signal, binary } = opts
     const out: Out[] = []
@@ -66,10 +66,25 @@ function asyncSpawn <T extends boolean = false> (cmd: string, args: string[], op
   }) as StrBufPromise<T>
 }
 
-function execNpm <T extends boolean = false> (args: string[], opts: SpawnOpts<T> & { home: string, tmpDir: string }): StrBufPromise<T> {
-  const { tmpDir, home } = opts
+interface ConfigOpts {
+  home: string
+  tmpDir: string
+  npmKey?: string
+  npmCert?: string
+  npmCa?: string[]
+  npmRegistry?: string
+  /**
+   * A list of registry for a set of scopes:
+   *
+   * `{ foo: 'bar' }` will turn into `--@foo:registry=bar`
+   */
+  scopeRegistries?: { [key: string]: string }
+}
+
+function execNpm <T extends boolean = false> (args: string[], opts: SpawnOpts & ConfigOpts): StrBufPromise<T> {
+  const { tmpDir, home, npmKey, npmCert, npmCa, npmRegistry, scopeRegistries, ...spawnOpts } = opts
   const cache = path.join(tmpDir, PLUGINS_CACHE_FOLDER)
-  return asyncSpawn('npm', [
+  const finalArgs = [
     '--global', // By using global install we make sure that no additional cache is used
     '--no-fund', // We don't have output so we don't need fund messages
     '--no-audit', // Using audit could reveal plugins to Microsoft
@@ -81,14 +96,37 @@ function execNpm <T extends boolean = false> (args: string[], opts: SpawnOpts<T>
     '--no-package-lock', // We don't have a package-lock, no need to look for it
     '--no-update-notifier', // It doesn't matter if the npm version is old, we will not install a new one.
     ...args
-  ], opts)
+  ]
+  if (typeof npmKey === 'string') {
+    finalArgs.unshift(`--key=${npmKey}`)
+  }
+  if (typeof npmCert === 'string') {
+    finalArgs.unshift(`--cert=${npmCert}`)
+  }
+  if (Array.isArray(npmCa)) {
+    for (const ca of npmCa) {
+      finalArgs.unshift(`--ca=${ca}`)
+    }
+  }
+  if (typeof npmRegistry === 'string') {
+    finalArgs.unshift(`--registry=${npmRegistry}`)
+  }
+  if (typeof scopeRegistries === 'object') {
+    for (const scope in scopeRegistries) {
+      finalArgs.unshift(`--@${scope}=${scopeRegistries[scope]}`)
+    }
+  }
+  return asyncSpawn('npm', finalArgs, {
+    binary: true,
+    ...spawnOpts
+  })
 }
 
-async function npmPkgExec (pkgs: Iterable<string>, op: 'remove' | 'install', tmpDir: string, home: string): Promise<void> {
+async function npmPkgExec (pkgs: Iterable<string>, op: 'remove' | 'install', opts: ConfigOpts): Promise<void> {
   try {
     const pkgArray = Array.from(pkgs)
     debug('Running %s for %s', op, pkgArray)
-    const result = await execNpm([op, ...pkgArray], { binary: true, tmpDir, home })
+    const result = await execNpm([op, ...pkgArray], opts)
     debug('Npm %s output: %s', op, result)
   } catch (err) {
     debug('Error while %s: %s', op, err)
@@ -152,8 +190,13 @@ interface ValidatedPluginDefinitions {
 
 export type PluginDefinitions = ValidatedPluginDefinitions | Map<string, string>
 
-async function assertInstalled (plugins: FNOrResult<PluginDefinitions>, { tmpDir, maxAge, strict }: { tmpDir: string, maxAge: number, strict: boolean }): Promise<string[]> {
+async function assertInstalled (plugins: FNOrResult<PluginDefinitions>, opts: LoadPluginsOptions): Promise<string[]> {
+  const { tmpDir, maxAge, strict } = opts
   const home = path.join(tmpDir, PLUGINS_FOLDER)
+  const npmOpts: ConfigOpts = {
+    home: home,
+    ...opts
+  }
   const state = await readState({ tmpDir })
   const max = Date.now() - maxAge
   const stateNames = Object.keys(state.pluginsMap)
@@ -189,8 +232,8 @@ async function assertInstalled (plugins: FNOrResult<PluginDefinitions>, { tmpDir
     await mkdir(home, { recursive: true })
 
     // Remove first to free space as the space is limited.
-    if (toRemove.size > 0) await npmPkgExec(toRemove.keys(), 'remove', tmpDir, home)
-    if (toInstall.size > 0) await npmPkgExec(await toInstallKeys(toInstall, strict), 'install', tmpDir, home)
+    if (toRemove.size > 0) await npmPkgExec(toRemove.keys(), 'remove', npmOpts)
+    if (toInstall.size > 0) await npmPkgExec(await toInstallKeys(toInstall, strict), 'install', npmOpts)
 
     const stateFs: StateFs = {
       hash,
@@ -287,12 +330,21 @@ async function prepare ({ tmpDir, names }: { tmpDir: string, names: string[] }):
   return plugins
 }
 
-export async function loadPlugins (plugins: FNOrResult<PluginDefinitions>, { tmpDir, maxAge, strict }: { tmpDir?: string, maxAge?: number, strict?: boolean } = {}): Promise<{ [key: string]: Plugin }> {
-  tmpDir = tmpDir ?? DEFAULT_TMP_DIR
-  maxAge = maxAge ?? DEFAULT_MAX_AGE
-  strict = strict ?? true
-  const names = await assertInstalled(plugins, { tmpDir, maxAge, strict })
-  return await prepare({ tmpDir, names })
+export interface LoadPluginsOptions extends Omit<ConfigOpts, 'home'> {
+  tmpDir: string
+  maxAge: number
+  strict: boolean
+}
+
+export async function loadPlugins (plugins: FNOrResult<PluginDefinitions>, opts: Partial<LoadPluginsOptions> = {}): Promise<{ [key: string]: Plugin }> {
+  const normalizedOpts = {
+    tmpDir: DEFAULT_TMP_DIR,
+    maxAge: DEFAULT_MAX_AGE,
+    strict: true,
+    ...opts
+  }
+  const names = await assertInstalled(plugins, normalizedOpts)
+  return await prepare({ tmpDir: normalizedOpts.tmpDir, names })
 }
 
 function validatePluginDefinition (key: string, value: string, index: number, strict: boolean): string {
