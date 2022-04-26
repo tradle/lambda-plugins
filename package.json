@@ -10,7 +10,7 @@
     "build": "tsc -p tsconfig.mjs.json && tsc -p tsconfig.cjs.json",
     "lint": "ts-standard",
     "unit": "c8 --reporter=html ts-node test/*.test.ts",
-    "test": "npm run lint"
+    "test": "npm run lint && npm run unit"
   },
   "ts-standard": {
     "ignore": [
