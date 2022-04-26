@@ -3,11 +3,12 @@ import { PluginDefinitions, validatePluginDefinitions } from '../index'
 
 const valids: Array<{ input: PluginDefinitions, test?: PluginDefinitions, strict?: boolean }> = [
   { input: {} },
-  {
-    input: {
-      a: '1.2.3'
-    }
-  },
+  { input: { a: '1.2.3' } },
+  { input: { a: '1.2' }, strict: false },
+  { input: { a: '1.2.x' }, strict: false },
+  { input: { a: '1.2.3-prerelease.build1' } },
+  { input: { a: '1.2.3-prerelease.build1+build' } },
+  { input: { a: '1.2.3+build' } },
   {
     input: {
       // Keys unsorted!
@@ -144,6 +145,18 @@ const invalids: Array<{ def: PluginDefinitions, error: string, strict?: boolean 
       ' a': '1.2.3'
     },
     error: 'Entry #0 has a name with a space in it, this is not acceptable. Use names without spaces!'
+  },
+  {
+    def: { a: '1.2x.3' },
+    error: 'Entry #0 "a" needs to be either a (semver-)version like 1.2.3 or a valid URL: 1.2x.3'
+  },
+  {
+    def: { a: '1.2.3x' },
+    error: 'Entry #0 "a" needs to be either a (semver-)version like 1.2.3 or a valid URL: 1.2.3x'
+  },
+  {
+    def: { a: '1.x2.3' },
+    error: 'Entry #0 "a" needs to be either a (semver-)version like 1.2.3 or a valid URL: 1.x2.3'
   }
 ]
 
