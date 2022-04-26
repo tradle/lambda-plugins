@@ -358,6 +358,9 @@ function validatePluginDefinition (key: string, value: string, index: number, st
   if (value === '*' || value === '') {
     throw new Error(`${e} "${key}" can not be marked as "${value}" as a vague version is not cachable or secure!`)
   }
+  // Note:
+  //   This does not support the entirety of semver definitions, combinations like "^2 >2.3 || <2.4" are not covered here.
+  //   Due to lack of time and immediate need.
   const parts = /^(\^|~|>=|<|>|<=|==)?((\d+)(\.([0-9]+|x))?(\.([0-9]+|x))?(-[a-z0-9.]+)?(\+[a-z0-9.]+)?)?$/i.exec(value)
   if (parts !== null) {
     /* eslint-disable-next-line @typescript-eslint/no-unused-vars */
