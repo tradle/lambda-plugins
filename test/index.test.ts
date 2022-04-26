@@ -1,7 +1,7 @@
 import * as test from 'fresh-tape'
 import { PluginDefinitions, validatePluginDefinitions } from '../index'
 
-const valids: Array<{ input: PluginDefinitions, test?: PluginDefinitions }> = [
+const valids: Array<{ input: PluginDefinitions, test?: PluginDefinitions, strict?: boolean }> = [
   { input: {} },
   {
     input: {
@@ -33,10 +33,44 @@ const valids: Array<{ input: PluginDefinitions, test?: PluginDefinitions }> = [
   {
     input: new Map<string, string>([['a', '1.2.3']]),
     test: { a: '1.2.3' }
+  },
+  {
+    input: { a: '^4.5' },
+    test: { a: '^4.5' },
+    strict: false
+  },
+  {
+    input: {
+      a: '1.2.3',
+      b: '~'
+    },
+    test: {
+      a: '1.2.3',
+      b: '~'
+    },
+    strict: false
+  },
+  {
+    input: {
+      a: '1'
+    },
+    test: {
+      a: '1'
+    },
+    strict: false
+  },
+  {
+    input: {
+      a: '1.2'
+    },
+    test: {
+      a: '1.2'
+    },
+    strict: false
   }
 ]
 
-const invalids: Array<{ def: PluginDefinitions, error: string }> = [
+const invalids: Array<{ def: PluginDefinitions, error: string, strict?: boolean }> = [
   {
     def: null as unknown as PluginDefinitions,
     error: 'input needs to be an key/value object, is (object) null'
@@ -55,26 +89,30 @@ const invalids: Array<{ def: PluginDefinitions, error: string }> = [
   },
   {
     def: { a: '^4.5' },
-    error: 'Entry #0 "a" can not specify a version range "^" and needs to be just the version: 4.5'
+    error: 'Entry #0 "a" can not specify a version range "^" and needs to be just the version: 4.5',
+    strict: true
   },
   {
     def: {
       a: '1.2.3',
       b: '~'
     },
-    error: 'Entry #1 "b" can not specify a version range "~" and needs to be just the version: 1.2.3'
+    error: 'Entry #1 "b" can not specify a version range "~" and needs to be just the version: 1.2.3',
+    strict: true
   },
   {
     def: {
       a: '1'
     },
-    error: 'Entry #0 "a" can not specify a vague version range "1.x.x (x needs to be defined!)'
+    error: 'Entry #0 "a" can not specify a vague version range "1.x.x (x needs to be defined!)',
+    strict: true
   },
   {
     def: {
       a: '1.2'
     },
-    error: 'Entry #0 "a" can not specify a vague version range "1.2.x (x needs to be defined!)'
+    error: 'Entry #0 "a" can not specify a vague version range "1.2.x (x needs to be defined!)',
+    strict: true
   },
   {
     def: {
@@ -114,7 +152,7 @@ test('validatePluginDefintions fixtures', async t => {
   for (const valid of valids) {
     let validated = {}
     t.doesNotThrow(() => {
-      validated = validatePluginDefinitions(valid.input)
+      validated = validatePluginDefinitions(valid.input, valid.strict ?? true)
     }, `valid #${index} ${JSON.stringify(valid)}: no error thrown`)
     const validTest = valid.test ?? valid.input
     t.deepEquals(validated, validTest, `valid #${index}: equal object returned.`)
@@ -122,9 +160,9 @@ test('validatePluginDefintions fixtures', async t => {
     index += 1
   }
   index = 0
-  for (const { def, error } of invalids) {
+  for (const { def, error, strict } of invalids) {
     t.throws(
-      () => validatePluginDefinitions(def),
+      () => validatePluginDefinitions(def, strict ?? false),
       { message: error },
       `invalid check #${index} ${JSON.stringify(def)}: ${error}`
     )

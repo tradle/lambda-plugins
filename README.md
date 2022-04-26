@@ -84,6 +84,14 @@ using the `{ maxAge: 1000 }` option:
 await loadPlugins(plugins, { maxAge: 1000 })
 ```
 
+By default the loading of plugins does not allow loose semver-version definitions.
+Versions installed using semvers like `~1.0.0` or `1` or `>=1` are not allowed.
+If you still want to use these, you need to pass the `strict = false` option.
+
+```js
+await loadPlugins(plugins, { strict: false })
+```
+
 Here is a flow explanation:
 
 ```

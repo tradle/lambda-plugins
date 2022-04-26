@@ -152,7 +152,7 @@ interface ValidatedPluginDefinitions {
 
 export type PluginDefinitions = ValidatedPluginDefinitions | Map<string, string>
 
-async function assertInstalled (plugins: FNOrResult<PluginDefinitions>, { tmpDir, maxAge }: { tmpDir: string, maxAge: number }): Promise<string[]> {
+async function assertInstalled (plugins: FNOrResult<PluginDefinitions>, { tmpDir, maxAge, strict }: { tmpDir: string, maxAge: number, strict: boolean }): Promise<string[]> {
   const home = path.join(tmpDir, PLUGINS_FOLDER)
   const state = await readState({ tmpDir })
   const max = Date.now() - maxAge
@@ -161,7 +161,7 @@ async function assertInstalled (plugins: FNOrResult<PluginDefinitions>, { tmpDir
     debug('State is too fresh (%s > %s), skip checking plugins assuming all installed.', state.timeMs, max)
     return stateNames
   }
-  const pluginsMap = validatePluginDefinitions(await toPromise(plugins))
+  const pluginsMap = validatePluginDefinitions(await toPromise(plugins), strict)
   const hash = JSON.stringify(pluginsMap)
   if (state.hash === hash) {
     debug('All required plugins (%s) installed, nothing to do.', plugins)
@@ -190,7 +190,7 @@ async function assertInstalled (plugins: FNOrResult<PluginDefinitions>, { tmpDir
 
     // Remove first to free space as the space is limited.
     if (toRemove.size > 0) await npmPkgExec(toRemove.keys(), 'remove', tmpDir, home)
-    if (toInstall.size > 0) await npmPkgExec(await toInstallKeys(toInstall), 'install', tmpDir, home)
+    if (toInstall.size > 0) await npmPkgExec(await toInstallKeys(toInstall, strict), 'install', tmpDir, home)
 
     const stateFs: StateFs = {
       hash,
@@ -287,14 +287,15 @@ async function prepare ({ tmpDir, names }: { tmpDir: string, names: string[] }):
   return plugins
 }
 
-export async function loadPlugins (plugins: FNOrResult<PluginDefinitions>, { tmpDir, maxAge }: { tmpDir?: string, maxAge?: number } = {}): Promise<{ [key: string]: Plugin }> {
+export async function loadPlugins (plugins: FNOrResult<PluginDefinitions>, { tmpDir, maxAge, strict }: { tmpDir?: string, maxAge?: number, strict?: boolean } = {}): Promise<{ [key: string]: Plugin }> {
   tmpDir = tmpDir ?? DEFAULT_TMP_DIR
   maxAge = maxAge ?? DEFAULT_MAX_AGE
-  const names = await assertInstalled(plugins, { tmpDir, maxAge })
+  strict = strict ?? true
+  const names = await assertInstalled(plugins, { tmpDir, maxAge, strict })
   return await prepare({ tmpDir, names })
 }
 
-function validatePluginDefinition (key: string, value: string, index: number): string {
+function validatePluginDefinition (key: string, value: string, index: number, strict: boolean): string {
   const e = `Entry #${index}`
   if (/\s/.test(key)) {
     throw new Error(`${e} has a name with a space in it, this is not acceptable. Use names without spaces!`)
@@ -308,11 +309,13 @@ function validatePluginDefinition (key: string, value: string, index: number): s
   const parts = /^(\^|~|>=|<|>|<=|==)?((\d+)(\.\d+)?(\.\d+)?)?$/.exec(value)
   if (parts !== null) {
     const [range, version, major, minor, patch] = parts.slice(1)
-    if (range !== undefined || range === '') {
-      throw new Error(`${e} "${key}" can not specify a version range "${range}" and needs to be just the version: ${version ?? '1.2.3'}`)
-    }
-    if (minor === undefined || patch === undefined) {
-      throw new Error(`${e} "${key}" can not specify a vague version range "${major}${minor ?? '.x'}${patch ?? '.x'} (x needs to be defined!)`)
+    if (strict) {
+      if (range !== undefined || range === '') {
+        throw new Error(`${e} "${key}" can not specify a version range "${range}" and needs to be just the version: ${version ?? '1.2.3'}`)
+      }
+      if (minor === undefined || patch === undefined) {
+        throw new Error(`${e} "${key}" can not specify a vague version range "${major}${minor ?? '.x'}${patch ?? '.x'} (x needs to be defined!)`)
+      }
     }
     return `${key}@${value}`
   } else {
@@ -343,7 +346,7 @@ function sortByFirst ([a]: [string, string], [b]: [string, string]): number {
   return 0
 }
 
-export function validatePluginDefinitions (input: any): ValidatedPluginDefinitions {
+export function validatePluginDefinitions (input: any, strict: boolean): ValidatedPluginDefinitions {
   const inputType = typeof input
   if (inputType !== 'object' || input === null) {
     throw new Error(`input needs to be an key/value object, is (${inputType}) ${String(input)}`)
@@ -352,7 +355,7 @@ export function validatePluginDefinitions (input: any): ValidatedPluginDefinitio
   let index = 0
   const result: { [key: string]: string } = {}
   for (const [key, value] of entries) {
-    validatePluginDefinition(key, value, index)
+    validatePluginDefinition(key, value, index, strict)
     result[key] = value
     index += 1
   }
@@ -363,14 +366,14 @@ function isS3URL (input: string): boolean {
   return /^s3:/.test(input)
 }
 
-async function toInstallKeys (toInstall: Map<string, string>): Promise<string[]> {
+async function toInstallKeys (toInstall: Map<string, string>, strict: boolean): Promise<string[]> {
   let index = 0
   const installKeys: string[] = []
   const queue = new PQueue({
     concurrency: S3_DOWNLOAD_CONCURRENCY
   })
   for (const [name, version] of toInstall.entries()) {
-    const key = validatePluginDefinition(name, version, index)
+    const key = validatePluginDefinition(name, version, index, strict)
     if (isS3URL(key)) {
       await queue.add(async (): Promise<void> => {
         installKeys.push(await resolveS3Target(key))
