@@ -132,6 +132,21 @@ Here is a flow explanation:
 Furthermore, this package uses `debug` and by adding the `DEBUG=*` environment
 variable you can get insight on what happens.
 
+## Development
+
+The code here uses a pretty straightforward development model. The only thing that may not be
+obvious is the example code in `sls-aws-example`. In order for that to work, we need do releases
+manually. When you do a release:
+
+1. Change the version number in the [package.json](./package.json)
+2. In the `sls-aws-example` change the dependency to the same version as in the `package.json`.
+3. Run `npm i` in the `sls-aws-example`.
+4. Now add all files necessary should be prepared for the git commit.
+
+Naturally when doing changes on this repo you should provide tests and expand on the example.
+To test the changes you have made with the example, run the `npm run update-parent` command
+in the `sls-aws-example` before deploying it to AWS.
+
 ## License
 
 [MIT](./LICENSE)
