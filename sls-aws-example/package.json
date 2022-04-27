@@ -4,7 +4,8 @@
   "private": true,
   "scripts": {
     "build": "tsc",
-    "preinstall": "rm -rf node_modules/@tradle/lambda-plugins; cd ..; npm run prepare >/dev/null; npm pack --ignore-scripts --loglevel=error"
+    "preinstall": "cd ..; npm pack",
+    "update-parent": "rm -rf node_modules/@tradle/lambda-plugins; (cd ..; npm run prepare); npm i ../$(cd ..; npm pack --ignore-scripts --loglevel=error)"
   },
   "devDependencies": {
     "@types/debug": "^4.1.7",
@@ -13,7 +14,7 @@
     "typescript": "^4.6.3"
   },
   "dependencies": {
-    "@tradle/lambda-plugins": "file:../tradle-lambda-plugins-3.1.0.tgz",
+    "@tradle/lambda-plugins": "file:../tradle-lambda-plugins-3.1.1.tgz",
     "aws-sdk": "^2.1001.0",
     "debug": "^4.3.4"
   }

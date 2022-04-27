@@ -32,14 +32,13 @@ interface SpawnOpts extends Pick<SpawnOptions, 'timeout' | 'env' | 'cwd'> {
   binary?: boolean
 }
 
-type StrBufPromise <T extends boolean> = T extends true ? Promise<Buffer> : Promise<string>
-
 interface Out {
   type: number
   data: Buffer
 }
 
-function asyncSpawn <T extends boolean = false> (cmd: string, args: string[], opts: SpawnOpts): StrBufPromise<T> {
+/* eslint-disable-next-line @typescript-eslint/promise-function-async */
+function asyncSpawn (cmd: string, args: string[], opts: SpawnOpts): Promise<string | Buffer> {
   return new Promise((resolve, reject) => {
     const { timeout, env, cwd, signal, binary } = opts
     const out: Out[] = []
@@ -63,7 +62,7 @@ function asyncSpawn <T extends boolean = false> (cmd: string, args: string[], op
 
     p.stdout.on('data', data => out.push({ type: 0b01, data }))
     p.stderr.on('data', data => out.push({ type: 0b10, data }))
-  }) as StrBufPromise<T>
+  })
 }
 
 interface ConfigOpts {
@@ -81,53 +80,12 @@ interface ConfigOpts {
   scopeRegistries?: { [key: string]: string }
 }
 
-function execNpm <T extends boolean = false> (args: string[], opts: SpawnOpts & ConfigOpts): StrBufPromise<T> {
-  const { tmpDir, home, npmKey, npmCert, npmCa, npmRegistry, scopeRegistries, ...spawnOpts } = opts
-  const cache = path.join(tmpDir, PLUGINS_CACHE_FOLDER)
-  const finalArgs = [
-    '--global', // By using global install we make sure that no additional cache is used
-    '--no-fund', // We don't have output so we don't need fund messages
-    '--no-audit', // Using audit could reveal plugins to Microsoft
-    '--no-bin-links', // Installing binaries could be dangerous for the execution
-    `--cache=${cache}`, // The installation process may need a writable cache
-    `--prefix=${home}`, // Location where the eventual models are installed.
-    '--prefer-offline', // if offline version is available, that should be used
-    '--loglevel=error', // Minimum necessary log level
-    '--no-package-lock', // We don't have a package-lock, no need to look for it
-    '--no-update-notifier', // It doesn't matter if the npm version is old, we will not install a new one.
-    ...args
-  ]
-  if (typeof npmKey === 'string') {
-    finalArgs.unshift(`--key=${npmKey}`)
-  }
-  if (typeof npmCert === 'string') {
-    finalArgs.unshift(`--cert=${npmCert}`)
-  }
-  if (Array.isArray(npmCa)) {
-    for (const ca of npmCa) {
-      finalArgs.unshift(`--ca=${ca}`)
-    }
-  }
-  if (typeof npmRegistry === 'string') {
-    finalArgs.unshift(`--registry=${npmRegistry}`)
-  }
-  if (typeof scopeRegistries === 'object') {
-    for (const scope in scopeRegistries) {
-      finalArgs.unshift(`--@${scope}=${scopeRegistries[scope]}`)
-    }
-  }
-  return asyncSpawn('npm', finalArgs, {
-    binary: true,
-    ...spawnOpts
-  })
-}
-
-async function npmPkgExec (pkgs: Iterable<string>, op: 'remove' | 'install', opts: ConfigOpts): Promise<void> {
+async function npmPkgExec (pkgs: Iterable<string>, home: string, op: 'remove' | 'install'): Promise<void> {
   try {
     const pkgArray = Array.from(pkgs)
     debug('Running %s for %s', op, pkgArray)
-    const result = await execNpm([op, ...pkgArray], opts)
-    debug('Npm %s output: %s', op, result)
+    const result = await asyncSpawn('npm', [op, `--prefix=${home}`, ...pkgArray], { binary: true })
+    debug('Npm %s output: %s', op, result.toString())
   } catch (err) {
     debug('Error while %s: %s', op, err)
     throw err
@@ -193,10 +151,6 @@ export type PluginDefinitions = ValidatedPluginDefinitions | Map<string, string>
 async function assertInstalled (plugins: FNOrResult<PluginDefinitions>, opts: LoadPluginsOptions): Promise<string[]> {
   const { tmpDir, maxAge, strict } = opts
   const home = path.join(tmpDir, PLUGINS_FOLDER)
-  const npmOpts: ConfigOpts = {
-    home: home,
-    ...opts
-  }
   const state = await readState({ tmpDir })
   const max = Date.now() - maxAge
   const stateNames = Object.keys(state.pluginsMap)
@@ -230,10 +184,11 @@ async function assertInstalled (plugins: FNOrResult<PluginDefinitions>, opts: Lo
   }
   try {
     await mkdir(home, { recursive: true })
+    await prepareNpmrc(home, opts)
 
     // Remove first to free space as the space is limited.
-    if (toRemove.size > 0) await npmPkgExec(toRemove.keys(), 'remove', npmOpts)
-    if (toInstall.size > 0) await npmPkgExec(await toInstallKeys(toInstall, strict), 'install', npmOpts)
+    if (toRemove.size > 0) await npmPkgExec(toRemove.keys(), home, 'remove')
+    if (toInstall.size > 0) await npmPkgExec(await toInstallKeys(toInstall, strict), home, 'install')
 
     const stateFs: StateFs = {
       hash,
@@ -245,6 +200,61 @@ async function assertInstalled (plugins: FNOrResult<PluginDefinitions>, opts: Lo
     debug('Error while installing the current plugins: %s, %s', installedNames, err)
     return []
   }
+}
+
+async function prepareNpmrc (home: string, opts: LoadPluginsOptions): Promise<void> {
+  const { tmpDir, npmKey, npmCert, npmCa, npmRegistry, scopeRegistries, registryTokens } = opts
+  const cache = path.join(tmpDir, PLUGINS_CACHE_FOLDER)
+  let npmrc = `
+# By using global install we make sure that no additional cache is used
+global = true
+# We don't have output so we don't need fund messages
+fund = false
+# Using audit could reveal plugins to Microsoft
+audit = false
+# Installing binaries could be dangerous for the execution
+bin-links = false
+# The installation process may need a writable cache
+cache = ${cache}
+# if offline version is available, that should be used
+prefer-offline = true
+# Minimum necessary log level
+loglevel = error
+# We don't have a package-lock, no need to look for it
+package-lock = false
+# It doesn't matter if the npm version is old, we will not install a new one.
+update-notifier = false
+`
+  if (typeof npmKey === 'string') {
+    npmrc += `key=${npmKey}\n`
+  }
+  if (typeof npmCert === 'string') {
+    npmrc += `cert=${npmCert}\n`
+  }
+  if (Array.isArray(npmCa)) {
+    for (const ca of npmCa) {
+      npmrc += `ca[]=${ca}\n`
+    }
+  }
+  if (typeof npmRegistry === 'string') {
+    npmrc += `registry=${npmRegistry}\n`
+  }
+  if (typeof scopeRegistries === 'object' && scopeRegistries !== null) {
+    for (const scope in scopeRegistries) {
+      npmrc += `@${scope}:registry=${scopeRegistries[scope]}\\n`
+    }
+  }
+  if (typeof registryTokens === 'object' && registryTokens !== null) {
+    for (const registry in registryTokens) {
+      npmrc += `//${registry}:_authToken=${registryTokens[registry]}\n`
+    }
+  }
+  const npmrcPath = path.join(home, '.npmrc')
+  debug('npmrc @%s: %s', npmrcPath, npmrc)
+  await writeFile(
+    npmrcPath,
+    npmrc
+  )
 }
 
 interface Cause {
@@ -334,6 +344,10 @@ export interface LoadPluginsOptions extends Omit<ConfigOpts, 'home'> {
   tmpDir: string
   maxAge: number
   strict: boolean
+  /**
+   * A list of registry tokens to access private npm registries
+   */
+  registryTokens?: { [registry: string]: string }
 }
 
 export async function loadPlugins (plugins: FNOrResult<PluginDefinitions>, opts: Partial<LoadPluginsOptions> = {}): Promise<{ [key: string]: Plugin }> {

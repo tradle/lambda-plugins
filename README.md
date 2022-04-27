@@ -66,7 +66,7 @@ has permission to access this bucket:
     'arn:aws:s3:::private-bucket/*'
 ```
 
-## Implementation details
+## Options
 
 By default it will install the packages in the `/tmp` folder. You can override
 this by using the `{ tmpDir }` option:
@@ -91,6 +91,26 @@ If you still want to use these, you need to pass the `strict = false` option.
 ```js
 await loadPlugins(plugins, { strict: false })
 ```
+
+To install private packages you will need to specify an authentication token.
+
+```js
+await loadPlugins(plugins, { registryTokens: { 'host': 'token' } })
+```
+
+In practice it may look like:
+
+```js
+await loadPlugins(plugins, { registryTokens: { "registry.npmjs.org/": "npm_Fo2387C3auJep6agQr41NCDHXW2BDz1S07mf" } } )
+```
+
+Depending on the registry, there are different ways to get a token. Here is the
+documentation for 
+
+- [npm access token](https://docs.npmjs.com/creating-and-viewing-access-tokens)
+- [github registry token](https://docs.github.com/en/actions/publishing-packages/publishing-nodejs-packages#authenticating-to-the-destination-repository)
+
+## Flow
 
 Here is a flow explanation:
 

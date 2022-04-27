@@ -21,7 +21,8 @@ async function main (event: any, plugins: { [key: string]: Plugin }) {
 
 export async function hello (event: any): Promise<any> {
   const plugins = await loadPlugins(
-    JSON.parse(process.env.PLUGINS ?? '{}')
+    JSON.parse(process.env.PLUGINS ?? '{}'),
+    JSON.parse(process.env.PLUGIN_OPTS ?? '{}')
   )
   return {
     statusCode: 200,

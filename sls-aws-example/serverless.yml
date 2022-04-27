@@ -27,5 +27,6 @@ resources:
 functions:
   hello:
     handler: handler.hello
+    timeout: 90
     environment:
       DEBUG: '*'
