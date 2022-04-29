@@ -92,6 +92,13 @@ If you still want to use these, you need to pass the `strict = false` option.
 await loadPlugins(plugins, { strict: false })
 ```
 
+By default there will be also no error if the installation of the plugins happens
+to fail. In order to enable errors you need to pass `failQuietly=false`.
+
+```js
+await loadPlugins(plugins, { failQuietyl: false })
+```
+
 To install private packages you will need to specify an authentication token.
 
 ```js

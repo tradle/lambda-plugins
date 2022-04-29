@@ -197,6 +197,9 @@ async function assertInstalled (plugins: FNOrResult<PluginDefinitions>, opts: Lo
     await writeFile(state.path, JSON.stringify(stateFs))
     return installedNames
   } catch (err) {
+    if (!opts.failQuietly) {
+      throw Object.assign(new Error(`Error while installing the current plugins (${installedNames.join(', ')}): ${String(err)}`), { cause: err })
+    }
     debug('Error while installing the current plugins: %s, %s', installedNames, err)
     return []
   }
@@ -344,6 +347,7 @@ export interface LoadPluginsOptions extends Omit<ConfigOpts, 'home'> {
   tmpDir: string
   maxAge: number
   strict: boolean
+  failQuietly: boolean
   /**
    * A list of registry tokens to access private npm registries
    */
@@ -354,6 +358,7 @@ export async function loadPlugins (plugins: FNOrResult<PluginDefinitions>, opts:
   const normalizedOpts = {
     tmpDir: DEFAULT_TMP_DIR,
     maxAge: DEFAULT_MAX_AGE,
+    failQuietly: true,
     strict: true,
     ...opts
   }
